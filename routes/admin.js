@@ -1,22 +1,49 @@
-// backend/models/User.js
-const mongoose = require('mongoose');
-// const bcrypt = require('bcryptjs'); // لا تحتاج هذا هنا إلا إذا كنت تستخدم pre-save hook
+// backend/routes/admin.js
+const express = require('express');
+const router = express.Router();
+const User = require('../models/User'); // استيراد نموذج المستخدم الصحيح
+const Setting = require('../models/Setting'); // استيراد نموذج الإعدادات (إذا كان موجوداً)
+const authMiddleware = require('../middleware/auth'); // لِحماية المسارات
+// إذا كان لديك middleware خاص بالمدير للتحقق من أن المستخدم هو مدير:
+// const adminMiddleware = require('../middleware/admin'); 
 
-const userSchema = new mongoose.Schema({
-    username: { type: String, required: true, unique: true },
-    email: { type: String, required: true, unique: true }, // حقل الإيميل أساسي للتسجيل والدخول
-    password: { type: String, required: true },
-    isAdmin: { type: Boolean, default: false },
-    playerCoins: { type: Number, default: 500 },
-    luckyPoints: { type: Number, default: 0 },
-    roundsPlayed: { type: Number, default: 0 },
-    personalScores: [{ // تخزين النتائج الفردية
-        round: { type: Number, required: true },
-        score: { type: Number, required: true },
-        prize: { type: String, default: 'None' },
-        date: { type: Date, default: Date.now }
-    }],
-    lastLogin: { type: Date, default: Date.now }
-}, { timestamps: true });
 
-module.exports = mongoose.model('User', userSchema);
+// مثال: مسار لجلب جميع المستخدمين (محمي للمديرين فقط)
+// ستحتاج إلى adminMiddleware إذا أردت التأكد من أن المستخدم مدير
+router.get('/users', authMiddleware, /* adminMiddleware, */ async (req, res) => {
+    try {
+        const users = await User.find().select('-password'); // استبعاد كلمات المرور
+        res.json(users);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: 'Server error fetching users', error: err.message });
+    }
+});
+
+// مثال: مسار لتحديث إعدادات اللعبة (محمي للمديرين فقط)
+router.put('/settings', authMiddleware, /* adminMiddleware, */ async (req, res) => {
+    const newSettings = req.body;
+    try {
+        let settings = await Setting.findOne({ name: 'gameConfig' });
+        if (!settings) {
+            // إذا لم تكن الإعدادات موجودة، أنشئ إعدادات جديدة
+            settings = new Setting({ name: 'gameConfig', value: newSettings });
+        } else {
+            // وإلا، قم بتحديث القيمة
+            settings.value = newSettings;
+        }
+        await settings.save();
+        res.json({ message: 'Game settings updated successfully', settings: settings.value });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: 'Server error updating settings', error: err.message });
+    }
+});
+
+// يمكنك إضافة مسارات أخرى خاصة بالمدير هنا
+// مثل:
+// - router.post('/user/create', ...)
+// - router.put('/user/:id', ...) لتعديل مستخدم معين
+// - router.delete('/user/:id', ...) لحذف مستخدم
+
+module.exports = router;
