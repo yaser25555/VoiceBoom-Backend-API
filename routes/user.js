@@ -2,7 +2,10 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User'); // استيراد نموذج المستخدم
-const authMiddleware = require('../middleware/auth'); // لِحماية المسارات والوصول إلى req.user
+const authMiddleware = require('../models/User'); // استيراد الـ Middleware الصحيح: يجب أن يكون من 'auth'
+// قم بتصحيح السطر أعلاه ليصبح:
+// const authMiddleware = require('../middleware/auth'); // لِحماية المسارات والوصول إلى req.user
+
 const Setting = require('../models/Setting'); // لاستيراد إعدادات اللعبة (مثل التكاليف وقيم الجوائز)
 
 // مسار لجلب بيانات المستخدم (محمي)
@@ -16,9 +19,9 @@ router.get('/data', authMiddleware, async (req, res) => {
         }
         res.json({
             username: user.username,
-            playerCoins: user.playerCoins,
-            luckyPoints: user.luckyPoints,
-            roundsPlayed: user.roundsPlayed,
+            score: user.score, // تم تغيير playerCoins إلى score هنا
+            level: user.level, // تم إضافة level
+            attempts: user.attempts, // تم إضافة attempts
             isAdmin: user.isAdmin // مهم للواجهة الأمامية لتبديل لوحة المدير
         });
     } catch (err) {
@@ -27,128 +30,119 @@ router.get('/data', authMiddleware, async (req, res) => {
     }
 });
 
-// مسار لتحديث بيانات المستخدم (مثل النقاط بعد اللعب)
-// هذا المسار عام وسيتم استدعاؤه بواسطة إجراءات اللعبة
-router.put('/update', authMiddleware, async (req, res) => {
-    const { playerCoins, luckyPoints, roundsPlayed } = req.body;
+// مسار موحد لجميع إجراءات اللعبة (تلقائي، ثلاثي، مطرقة)
+router.post('/action', authMiddleware, async (req, res) => {
+    const { action } = req.body; // استخراج نوع الإجراء من جسم الطلب
+    
     try {
-        let user = await User.findById(req.user.id);
+        const userId = req.user.id;
+        let user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        user.playerCoins = playerCoins !== undefined ? playerCoins : user.playerCoins;
-        user.luckyPoints = luckyPoints !== undefined ? luckyPoints : user.luckyPoints;
-        user.roundsPlayed = roundsPlayed !== undefined ? roundsPlayed : user.roundsPlayed;
+        // جلب إعدادات اللعبة
+        const gameSettings = await Setting.findOne({ name: 'gameConfig' });
+        // إذا لم يتم العثور على إعدادات، استخدم قيمًا افتراضية
+        const { maxScore, maxLevel, initialAttempts } = gameSettings ? gameSettings.value : { maxScore: 100, maxLevel: 5, initialAttempts: 3 };
 
-        await user.save();
-        res.json({ message: 'User data updated successfully', user });
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ message: 'Server error updating user data', error: err.message });
-    }
-});
+        let message = '';
+        let scoreChange = 0; // التغير في النقاط
+        let levelChange = 0;
+        let attemptsChange = 0; // التغير في المحاولات
 
-// دالة مساعدة لمعالجة إجراءات اللعبة لتجنب التكرار في الكود
-async function handleGameAction(req, res, actionType) {
-    try {
-        const user = await User.findById(req.user.id);
-        if (!user) {
-            return res.status(404).json({ message: 'User not found' });
+        if (user.attempts <= 0) {
+            return res.status(400).json({
+                message: 'انتهت محاولاتك! الرجاء البدء من جديد.',
+                score: user.score,
+                level: user.level,
+                attempts: user.attempts
+            });
         }
 
-        const gameConfig = await Setting.findOne({ name: 'gameConfig' });
-        if (!gameConfig || !gameConfig.value) {
-            return res.status(500).json({ message: 'Game settings not configured on server' });
-        }
-        const settings = gameConfig.value;
-
+        // تحديد التكلفة (Cost) وقيمة الجائزة (Prize Value)
         let cost = 0;
-        let requiresLuckyPoints = false;
-
-        switch (actionType) {
-            case 'auto-play':
-                cost = settings.autoPlayCost;
+        let basePrize = 0;
+        switch (action) {
+            case 'auto':
+                cost = 1; // تكلفة اللعب التلقائي
+                basePrize = 5; // أساس الجائزة
                 break;
-            case 'triple-hit':
-                cost = settings.tripleHitCost;
+            case 'tripleStrike':
+                cost = 2; // تكلفة الضربة الثلاثية
+                basePrize = 10;
                 break;
-            case 'hammer-hit':
-                cost = settings.hammerHitCost;
-                requiresLuckyPoints = true; // ضربة المطرقة تتطلب نقاط حظ
+            case 'hammerStrike':
+                cost = 3; // تكلفة ضربة المطرقة
+                basePrize = 15;
                 break;
             default:
-                return res.status(400).json({ message: 'Invalid game action type' });
+                return res.status(400).json({ message: 'إجراء غير صالح.' });
         }
 
-        if (requiresLuckyPoints) {
-            if (user.luckyPoints < cost) {
-                return res.status(400).json({ message: 'Not enough lucky points to perform this action' });
-            }
-            user.luckyPoints -= cost;
-        } else {
-            if (user.playerCoins < cost) {
-                return res.status(400).json({ message: 'Not enough coins to perform this action' });
-            }
-            user.playerCoins -= cost;
-        }
+        // خصم التكلفة
+        user.score -= cost;
+        attemptsChange = -1; // خصم محاولة واحدة لكل إجراء
+        user.attempts += attemptsChange;
 
-        // محاكاة منطق اللعبة (مبسط للتوضيح)
-        const prizeType = settings.prizeType || 'coins'; // الافتراضي هو النقاط
-        const prizeValue = settings.prizeValue || 10; // قيمة الجائزة الافتراضية
-
+        // منطق حساب النقاط والجائزة
         let prizeAmount = 0;
-        const random = Math.random(); // رقم عشوائي بين 0 و 1
+        let random = Math.random();
 
-        if (actionType === 'hammer-hit') { // ضربة المطرقة عادة تضمن فوزاً أو جائزة أكبر
-            if (random < 0.7) { // 70% فرصة للفوز بالمطرقة
-                prizeAmount = Math.floor(prizeValue * (1 + Math.random())); // من 1x إلى 2x قيمة الجائزة
-            } else {
-                prizeAmount = -Math.floor(prizeValue / 2); // خسارة بسيطة
+        if (action === 'tripleStrike') {
+            if (random < 0.6) { // 60% فرصة للفوز بـ 1.5x - 3x
+                prizeAmount = Math.floor(basePrize * (1.5 + Math.random() * 1.5));
+            } else { // 40% فرصة لخسارة 0.5x
+                prizeAmount = -Math.floor(basePrize * 0.5);
             }
-        } else if (actionType === 'triple-hit') {
-             if (random < 0.5) { // 50% فرصة للفوز بالضربة الثلاثية
-                prizeAmount = Math.floor(prizeValue * (0.5 + Math.random())); // من 0.5x إلى 1.5x قيمة الجائزة
-            } else {
-                prizeAmount = -Math.floor(prizeValue / 3); // خسارة أصغر
+        } else if (action === 'hammerStrike') {
+            if (random < 0.7) { // 70% فرصة للفوز بـ 2x - 4x
+                prizeAmount = Math.floor(basePrize * (2 + Math.random() * 2));
+            } else { // 30% فرصة لخسارة 0.75x
+                prizeAmount = -Math.floor(basePrize * 0.75);
             }
-        } else { // اللعب التلقائي (auto-play)
-            if (random < 0.3) { // 30% فرصة للفوز باللعب التلقائي
-                prizeAmount = Math.floor(prizeValue * Math.random()); // حتى 1x قيمة الجائزة
-            } else {
-                prizeAmount = -Math.floor(prizeValue / 4); // أصغر خسارة
+        } else { // 'auto'
+            if (random < 0.4) { // 40% فرصة للفوز بـ 0.5x - 1.5x
+                prizeAmount = Math.floor(basePrize * (0.5 + Math.random()));
+            } else { // 60% فرصة لخسارة 0.25x
+                prizeAmount = -Math.floor(basePrize * 0.25);
             }
         }
 
-        if (prizeType === 'coins') {
-            user.playerCoins += prizeAmount;
-        } else { // lucky_points
-            user.luckyPoints += prizeAmount;
+        user.score += prizeAmount;
+        message = `حصلت على ${prizeAmount} نقطة!`;
+
+        // التأكد من عدم نزول النقاط عن الصفر
+        if (user.score < 0) user.score = 0;
+
+        // منطق رفع المستوى
+        if (user.score >= maxScore && user.level < maxLevel) {
+            user.level += 1;
+            user.score = 0; // إعادة تعيين النقاط للمستوى الجديد
+            user.attempts = initialAttempts; // إعادة تعيين المحاولات للمستوى الجديد
+            message += ` لقد وصلت إلى المستوى ${user.level} الجديد!`;
         }
 
-        user.roundsPlayed += 1;
+        // إذا انتهت المحاولات
+        if (user.attempts <= 0) {
+            message = 'انتهت محاولاتك! سيتم إعادة توجيهك إلى صفحة تسجيل الدخول.';
+            user.attempts = 0; // تأكيد أن المحاولات لا تصبح سالبة
+            // حالياً، الكلاينت سيتعامل مع إعادة التوجيه بناءً على عدد المحاولات 0
+        }
 
         await user.save();
 
         res.json({
-            message: 'Game action successful',
-            playerCoins: user.playerCoins,
-            luckyPoints: user.luckyPoints,
-            roundsPlayed: user.roundsPlayed,
-            prizeAmount: prizeAmount,
-            prizeType: prizeType
+            message: message,
+            score: user.score,
+            level: user.level,
+            attempts: user.attempts
         });
 
     } catch (err) {
-        console.error(`Error in ${actionType}:`, err.message);
-        res.status(500).json({ message: `Server error during ${actionType}`, error: err.message });
+        console.error('Error during game action:', err);
+        res.status(500).json({ message: 'خطأ في الخادم أثناء تنفيذ الإجراء.', error: err.message });
     }
-}
-
-// مسارات إجراءات اللعبة (محمية)
-router.post('/auto-play', authMiddleware, (req, res) => handleGameAction(req, res, 'auto-play'));
-router.post('/triple-hit', authMiddleware, (req, res) => handleGameAction(req, res, 'triple-hit'));
-router.post('/hammer-hit', authMiddleware, (req, res) => handleGameAction(req, res, 'hammer-hit'));
-
+});
 
 module.exports = router;
