@@ -1,16 +1,14 @@
-// backend/models/User.js
 const mongoose = require('mongoose');
-// const bcrypt = require('bcryptjs'); // لا تحتاج هذا هنا إلا إذا كنت تستخدم pre-save hook
 
 const userSchema = new mongoose.Schema({
     username: { type: String, required: true, unique: true },
-    email: { type: String, required: true, unique: true }, // حقل الإيميل أساسي للتسجيل والدخول
+    email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     isAdmin: { type: Boolean, default: false },
     playerCoins: { type: Number, default: 500 },
     luckyPoints: { type: Number, default: 0 },
     roundsPlayed: { type: Number, default: 0 },
-    personalScores: [{ // تخزين النتائج الفردية
+    personalScores: [{
         round: { type: Number, required: true },
         score: { type: Number, required: true },
         prize: { type: String, default: 'None' },
@@ -19,4 +17,5 @@ const userSchema = new mongoose.Schema({
     lastLogin: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-module.exports = mongoose.model('User', userSchema);
+// تصدير النموذج. يتحقق هذا السطر مما إذا كان النموذج موجودًا بالفعل لمنع خطأ OverwriteModelError.
+module.exports = mongoose.models.User || mongoose.model('User', userSchema);
