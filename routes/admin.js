@@ -1,11 +1,12 @@
+// backend/routes/admin.js
 const express = require('express');
 const router = express.Router();
 const Setting = require('../models/Setting');
 const User = require('../models/User'); // للاستخدام في lastUpdatedBy
-const authMiddleware = require('../middleware/auth'); // سنقوم بإنشاء هذا الملف قريبا
+const authMiddleware = require('../middleware/auth');
 
 // Get Global Game Settings
-router.get('/settings', async (req, res) => { // This can be accessed by anyone (frontend needs to load it)
+router.get('/settings', async (req, res) => {
     try {
         const gameConfig = await Setting.findOne({ name: 'gameConfig' });
         if (!gameConfig) {
@@ -20,7 +21,8 @@ router.get('/settings', async (req, res) => { // This can be accessed by anyone 
 
 // Update Global Game Settings (Admin only)
 router.put('/settings', authMiddleware, async (req, res) => {
-    if (!req.user.isAdmin) {
+    // تأكد من أن الـ middleware يضيف req.user ومعلومة isAdmin
+    if (!req.user || !req.user.isAdmin) { // تحقق إضافي من وجود req.user
         return res.status(403).json({ message: 'Forbidden: Admin access required' });
     }
 
@@ -35,7 +37,7 @@ router.put('/settings', authMiddleware, async (req, res) => {
                     lastUpdatedAt: Date.now()
                 }
             },
-            { new: true, upsert: true } // upsert: true will create if not found
+            { new: true, upsert: true }
         );
         res.json({ message: 'Global settings updated successfully', settings: gameConfig.value });
     } catch (err) {

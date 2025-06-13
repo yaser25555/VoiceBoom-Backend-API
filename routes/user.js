@@ -1,112 +1,44 @@
-// backend/routes/auth.js
+// backend/routes/user.js
 const express = require('express');
 const router = express.Router();
-const bcrypt = require('bcryptjs'); // لتشفير كلمات المرور
-const jwt = require('jsonwebtoken'); // لإنشاء والتحقق من التوكنز
-const User = require('../models/User'); // استيراد موديل المستخدم
+const User = require('../models/User');
+const authMiddleware = require('../middleware/auth');
 
-// جلب JWT Secret من متغيرات البيئة
-const JWT_SECRET = process.env.JWT_SECRET;
-
-// @route   POST /api/auth/register
-// @desc    Register a new user
-// @access  Public
-router.post('/register', async (req, res) => {
-    const { username, email, password } = req.body;
-
+// Get User Data (requires authentication)
+router.get('/data', authMiddleware, async (req, res) => {
     try {
-        // التحقق مما إذا كان المستخدم موجوداً بالفعل
-        let user = await User.findOne({ email });
-        if (user) {
-            return res.status(400).json({ message: 'User already exists with this email' });
+        // req.user.id comes from the auth middleware after token verification
+        const user = await User.findById(req.user.id).select('-password'); // Exclude password
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
         }
-
-        // التحقق مما إذا كان اسم المستخدم موجوداً بالفعل
-        user = await User.findOne({ username });
-        if (user) {
-            return res.status(400).json({ message: 'Username is already taken' });
-        }
-
-        // إنشاء مستخدم جديد
-        user = new User({
-            username,
-            email,
-            password
-        });
-
-        // تشفير كلمة المرور
-        const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(password, salt);
-
-        // حفظ المستخدم في قاعدة البيانات
-        await user.save();
-
-        // إنشاء وتوقيع JWT
-        const payload = {
-            user: {
-                id: user.id,
-                // يمكنك إضافة isAdmin هنا إذا كنت تخزنها في الموديل
-                // isAdmin: user.isAdmin // إذا كان هذا الحقل موجوداً في موديل المستخدم
-            }
-        };
-
-        jwt.sign(
-            payload,
-            JWT_SECRET,
-            { expiresIn: '1h' }, // صلاحية التوكن لساعة واحدة
-            (err, token) => {
-                if (err) throw err;
-                res.status(201).json({ message: 'User registered successfully', token });
-            }
-        );
-
+        res.json(user);
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ message: 'Server error during registration', error: err.message });
+        res.status(500).json({ message: 'Server error fetching user data', error: err.message });
     }
 });
 
-// @route   POST /api/auth/login
-// @desc    Authenticate user & get token
-// @access  Public
-router.post('/login', async (req, res) => {
-    const { email, password } = req.body;
-
+// Update User Data (requires authentication)
+router.put('/update', authMiddleware, async (req, res) => {
+    const { playerCoins, luckyPoints, roundsPlayed, personalScores } = req.body;
     try {
-        // التحقق مما إذا كان المستخدم موجوداً
-        let user = await User.findOne({ email });
+        const user = await User.findById(req.user.id);
         if (!user) {
-            return res.status(400).json({ message: 'Invalid Credentials' });
+            return res.status(404).json({ message: 'User not found' });
         }
 
-        // مقارنة كلمة المرور
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(400).json({ message: 'Invalid Credentials' });
-        }
+        // Update only allowed fields to prevent arbitrary updates
+        if (playerCoins !== undefined) user.playerCoins = playerCoins;
+        if (luckyPoints !== undefined) user.luckyPoints = luckyPoints;
+        if (roundsPlayed !== undefined) user.roundsPlayed = roundsPlayed;
+        if (personalScores !== undefined) user.personalScores = personalScores; // تأكد من صلاحية هذا التحديث
 
-        // إنشاء وتوقيع JWT
-        const payload = {
-            user: {
-                id: user.id,
-                // يمكنك إضافة isAdmin هنا إذا كنت تخزنها في الموديل
-                // isAdmin: user.isAdmin // إذا كان هذا الحقل موجوداً في موديل المستخدم
-            }
-        };
-
-        jwt.sign(
-            payload,
-            JWT_SECRET,
-            { expiresIn: '1h' }, // صلاحية التوكن لساعة واحدة
-            (err, token) => {
-                if (err) throw err;
-                res.json({ message: 'Logged in successfully', token });
-            }
-        );
-
+        await user.save();
+        res.json({ message: 'User data updated successfully', user: user.select('-password') });
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ message: 'Server error during login', error: err.message });
+        res.status(500).json({ message: 'Server error updating user data', error: err.message });
     }
 });
 
