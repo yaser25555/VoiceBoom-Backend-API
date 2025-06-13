@@ -7,12 +7,18 @@ const cors = require('cors');
 // استيراد مسارات الـ API
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
-const userRoutes = require('./routes/user');
+const userRoutes = require('./routes/user'); // Assuming this is for generic user actions, not auth
 
 // تحميل متغيرات البيئة من ملف .env
 dotenv.config();
 
 const app = express();
+
+// Middleware لتسجيل كل طلب وارد - هذا مهم جداً لتحديد ما إذا كان الطلب يصل إلى Express
+app.use((req, res, next) => {
+    console.log(`Incoming Request: ${req.method} ${req.url}`);
+    next();
+});
 
 // **متغيرات البيئة الأساسية:**
 const MONGODB_URI = process.env.MONGO_URI;
@@ -45,17 +51,11 @@ app.get('/test', (req, res) => {
 });
 
 // **اتصال قاعدة البيانات (MongoDB Connection):**
-mongoose.connect(MONGODB_URI)
-    .then(() => {
-        console.log('MongoDB connected successfully');
-        app.listen(PORT, () => {
-            console.log(`Server running on port ${PORT}`);
-        });
-    })
-    .catch(err => {
-        console.error('MongoDB connection error:', err.message);
-        console.error('Error details:', err);
-        process.exit(1);
-    });
+mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+    .then(() => console.log('MongoDB connected successfully'))
+    .catch(err => console.error('MongoDB connection error:', err));
 
-module.exports = app;
+// **بدء تشغيل الخادم:**
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
