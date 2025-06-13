@@ -1,44 +1,67 @@
-// backend/routes/user.js
+// backend/routes/auth.js
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const authMiddleware = require('../middleware/auth');
 
-// Get User Data (requires authentication)
-router.get('/data', authMiddleware, async (req, res) => {
+const JWT_SECRET = process.env.JWT_SECRET;
+
+router.post('/register', async (req, res) => {
+    const { username, email, password } = req.body;
     try {
-        // req.user.id comes from the auth middleware after token verification
-        const user = await User.findById(req.user.id).select('-password'); // Exclude password
-        if (!user) {
-            return res.status(404).json({ message: 'User not found' });
+        let user = await User.findOne({ email });
+        if (user) {
+            return res.status(400).json({ message: 'User already exists with this email' });
         }
-        res.json(user);
+        user = await User.findOne({ username });
+        if (user) {
+            return res.status(400).json({ message: 'Username is already taken' });
+        }
+        user = new User({ username, email, password });
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(password, salt);
+        await user.save();
+        const payload = { user: { id: user.id } };
+        jwt.sign(
+            payload,
+            JWT_SECRET,
+            { expiresIn: '1h' },
+            (err, token) => {
+                if (err) throw err;
+                res.status(201).json({ message: 'User registered successfully', token });
+            }
+        );
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ message: 'Server error fetching user data', error: err.message });
+        res.status(500).json({ message: 'Server error during registration', error: err.message });
     }
 });
 
-// Update User Data (requires authentication)
-router.put('/update', authMiddleware, async (req, res) => {
-    const { playerCoins, luckyPoints, roundsPlayed, personalScores } = req.body;
+router.post('/login', async (req, res) => {
+    const { email, password } = req.body;
     try {
-        const user = await User.findById(req.user.id);
+        let user = await User.findOne({ email });
         if (!user) {
-            return res.status(404).json({ message: 'User not found' });
+            return res.status(400).json({ message: 'Invalid Credentials' });
         }
-
-        // Update only allowed fields to prevent arbitrary updates
-        if (playerCoins !== undefined) user.playerCoins = playerCoins;
-        if (luckyPoints !== undefined) user.luckyPoints = luckyPoints;
-        if (roundsPlayed !== undefined) user.roundsPlayed = roundsPlayed;
-        if (personalScores !== undefined) user.personalScores = personalScores; // تأكد من صلاحية هذا التحديث
-
-        await user.save();
-        res.json({ message: 'User data updated successfully', user: user.select('-password') });
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: 'Invalid Credentials' });
+        }
+        const payload = { user: { id: user.id } };
+        jwt.sign(
+            payload,
+            JWT_SECRET,
+            { expiresIn: '1h' },
+            (err, token) => {
+                if (err) throw err;
+                res.json({ message: 'Logged in successfully', token });
+            }
+        );
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ message: 'Server error updating user data', error: err.message });
+        res.status(500).json({ message: 'Server error during login', error: err.message });
     }
 });
 
