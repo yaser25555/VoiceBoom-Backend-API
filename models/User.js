@@ -18,4 +18,4 @@ const userSchema = new mongoose.Schema({
     lastLogin: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-module.exports = mongoose.models.User || mongoose.model('User', userSchema);s
+module.exports = mongoose.models.User || mongoose.model('User', userSchema);
