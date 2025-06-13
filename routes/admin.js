@@ -1,25 +1,52 @@
-// backend/routes/admin.js
-
+// backend/routes/admin.js (المسارات التي تحتاج لتعديل)
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User');
-const Setting = require('../models/Setting'); // تأكد أن لديك نموذج (Model) باسم Setting
 const authMiddleware = require('../middleware/auth');
-// إذا كان لديك middleware خاص بالمدير للتحقق من أن المستخدم هو مدير:
-// const adminMiddleware = require('../middleware/admin');
+const adminAuthMiddleware = require('../middleware/adminAuth');
+const User = require('../models/User');
+const Setting = require('../models/Setting');
 
+// ... (مسار GET /users كما هو) ...
 
-// مثال: مسار لجلب جميع المستخدمين (محمي للمديرين فقط)
-// ستحتاج إلى adminMiddleware إذا أردت التأكد من أن المستخدم مدير
-router.get('/users', authMiddleware, /* adminMiddleware, */ async (req, res) => {
+// مسار لتحديث بيانات مستخدم معين - يتطلب صلاحيات المدير
+router.put('/user/:id', authMiddleware, adminAuthMiddleware, async (req, res) => {
+    const { id } = req.params; // معرف المستخدم المراد تحديثه
+    // الحقول التي يمكن للمدير تعديلها بناءً على نموذجك الحالي
+    const { username, email, playerCoins, luckyPoints, roundsPlayed, isAdmin } = req.body;
+
     try {
-        const users = await User.find().select('-password'); // استبعاد كلمات المرور
-        res.json(users);
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({ message: 'المستخدم غير موجود.' });
+        }
+
+        // تحديث الحقول فقط إذا تم توفيرها في الجسم
+        if (username !== undefined) user.username = username;
+        if (email !== undefined) user.email = email;
+        if (playerCoins !== undefined) user.playerCoins = playerCoins;
+        if (luckyPoints !== undefined) user.luckyPoints = luckyPoints;
+        if (roundsPlayed !== undefined) user.roundsPlayed = roundsPlayed;
+        if (isAdmin !== undefined) user.isAdmin = isAdmin;
+
+        // لا نقوم بتعديل password أو personalScores من هنا مباشرة،
+        // حيث يحتاج password إلى تجزئة، و personalScores هي مصفوفة تحتاج لتعامل خاص إذا أردت تعديلها من لوحة المدير.
+
+        await user.save();
+        // إرجاع المستخدم بدون كلمة المرور أو تفاصيل personalScores الحساسة
+        const userResponse = user.toObject({ getters: true, virtuals: false, versionKey: false });
+        delete userResponse.password;
+        delete userResponse.personalScores; // لا تعرض تفاصيل السجل هذه في الواجهة الأمامية للمدير هنا
+
+        res.json({ message: 'تم تحديث بيانات المستخدم بنجاح.', user: userResponse });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ message: 'Server error fetching users', error: err.message });
+        console.error(`Admin Route /user/${id}: خطأ في تحديث المستخدم:`, err.message);
+        res.status(500).json({ message: 'خطأ في الخادم أثناء تحديث بيانات المستخدم.', error: err.message });
     }
 });
+
+// ... (بقية المسارات مثل DELETE /user/:id و GET /settings و PUT /settings كما هي) ...
+
+// module.exports = router; // هذا في نهاية الملف
 
 // **المسار الجديد: جلب إعدادات اللعبة (محمي للمستخدمين المصادق عليهم - يمكن إضافة adminMiddleware لاحقاً)**
 router.get('/settings', authMiddleware, async (req, res) => {
