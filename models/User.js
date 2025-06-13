@@ -15,8 +15,8 @@ const userSchema = new mongoose.Schema({
         score: { type: Number, required: true },
         prize: { type: String, default: 'None' },
         date: { type: Date, default: Date.now }
-    }], // << هذا القوس المربع `]` كان مفقوداً في نسختك السابقة!
+    }],
     lastLogin: { type: Date, default: Date.now }
-}, { timestamps: true }); // timestamps: true يضيف createdAt و updatedAt تلقائيا
+}, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

@@ -1,49 +1,22 @@
-// backend/routes/admin.js
-const express = require('express');
-const router = express.Router();
-const Setting = require('../models/Setting');
-const User = require('../models/User'); // للاستخدام في lastUpdatedBy
-const authMiddleware = require('../middleware/auth');
+// backend/models/User.js
+const mongoose = require('mongoose');
+// const bcrypt = require('bcryptjs'); // لا تحتاج هذا هنا إلا إذا كنت تستخدم pre-save hook
 
-// Get Global Game Settings
-router.get('/settings', async (req, res) => {
-    try {
-        const gameConfig = await Setting.findOne({ name: 'gameConfig' });
-        if (!gameConfig) {
-            return res.status(404).json({ message: 'Game settings not found' });
-        }
-        res.json(gameConfig.value);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ message: 'Server error fetching game settings', error: err.message });
-    }
-});
+const userSchema = new mongoose.Schema({
+    username: { type: String, required: true, unique: true },
+    email: { type: String, required: true, unique: true }, // حقل الإيميل أساسي للتسجيل والدخول
+    password: { type: String, required: true },
+    isAdmin: { type: Boolean, default: false },
+    playerCoins: { type: Number, default: 500 },
+    luckyPoints: { type: Number, default: 0 },
+    roundsPlayed: { type: Number, default: 0 },
+    personalScores: [{ // تخزين النتائج الفردية
+        round: { type: Number, required: true },
+        score: { type: Number, required: true },
+        prize: { type: String, default: 'None' },
+        date: { type: Date, default: Date.now }
+    }],
+    lastLogin: { type: Date, default: Date.now }
+}, { timestamps: true });
 
-// Update Global Game Settings (Admin only)
-router.put('/settings', authMiddleware, async (req, res) => {
-    // تأكد من أن الـ middleware يضيف req.user ومعلومة isAdmin
-    if (!req.user || !req.user.isAdmin) { // تحقق إضافي من وجود req.user
-        return res.status(403).json({ message: 'Forbidden: Admin access required' });
-    }
-
-    try {
-        const updatedSettings = req.body;
-        const gameConfig = await Setting.findOneAndUpdate(
-            { name: 'gameConfig' },
-            {
-                $set: {
-                    value: updatedSettings,
-                    lastUpdatedBy: req.user.id,
-                    lastUpdatedAt: Date.now()
-                }
-            },
-            { new: true, upsert: true }
-        );
-        res.json({ message: 'Global settings updated successfully', settings: gameConfig.value });
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ message: 'Server error updating game settings', error: err.message });
-    }
-});
-
-module.exports = router;
+module.exports = mongoose.model('User', userSchema);
