@@ -363,3 +363,4 @@ router.post('/triple-strike', authMiddleware, (req, res) => handleGameAction(req
 router.post('/hammer-strike', authMiddleware, (req, res) => handleGameAction(req, res, 'hammer-strike'));
 
 module.exports = router;
+
