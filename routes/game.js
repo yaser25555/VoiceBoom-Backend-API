@@ -4,9 +4,29 @@ const router = express.Router();
 const { protect, admin } = require('../middleware/authMiddleware'); // استيراد الـ middleware
 const User = require('../models/User'); // استيراد نموذج المستخدم
 
+// دالة مساعدة لتوليد حالة الصناديق الأولية (إذا لم تكن معرفة بالفعل)
+const generateInitialBoxes = (numBoxes) => {
+    // هذه مجرد دالة افتراضية، يمكنك تعديلها لإنشاء صناديق ذات قيم حقيقية أو مختلفة.
+    // حالياً، فقط تعيد مصفوفة فارغة لتمثل حالة الصناديق.
+    // في تطبيقك، قد ترغب في تحديد الصناديق الفائزة والخاسرة هنا.
+    // على سبيل المثال، 100 صندوق، 5 منها فائزة، 5 قنابل، والبقية عادية.
+    const boxes = [];
+    for (let i = 0; i < numBoxes; i++) {
+        boxes.push({ index: i, type: 'normal', value: 5, revealed: false });
+    }
+    // مثال: تحديد صندوق فائز واحد وصندوق قنبلة واحد
+    boxes[50].type = 'win'; // الصندوق رقم 51
+    boxes[50].value = 100;
+    boxes[10].type = 'bomb'; // الصندوق رقم 11
+    boxes[10].value = -10;
+    return boxes;
+};
+
+
 // **مسار جلب بيانات المستخدم (GET /api/user/me)**
 // هذا المسار سيستخدمه الواجهة الأمامية (game.html) لجلب بيانات المستخدم المحدثة عند تحميل الصفحة
 router.get('/user/me', protect, async (req, res) => {
+    console.log('User Me Route: Entered handler'); // <-- log جديد
     try {
         // req.user يأتي من الـ middleware 'protect' ويحتوي على بيانات المستخدم
         // لا نحتاج للبحث في قاعدة البيانات مرة أخرى
@@ -23,137 +43,208 @@ router.get('/user/me', protect, async (req, res) => {
                 // أضف أي بيانات أخرى تريد إرسالها للواجهة الأمامية
             }
         });
+        console.log('User Me Route: Response sent'); // <-- log جديد
     } catch (error) {
-        console.error('Error fetching user data:', error);
+        console.error('User Me Route: Error fetching user data:', error); // <-- log جديد
         res.status(500).json({ message: 'Server error fetching user data.' });
     }
 });
 
-
 // **مسار بدء جولة جديدة (POST /api/game/start-round)**
 router.post('/start-round', protect, async (req, res) => {
+    console.log('Start Round Route: Entered handler'); // <-- log جديد
     try {
-        // هنا يمكنك تهيئة أي بيانات خاصة بالجولة للمستخدم
-        // على سبيل المثال، إعطاء المستخدم 5 ضربات تلقائية عند بدء كل جولة جديدة
-        // أو التحقق مما إذا كان لديهم ما يكفي من العملة لبدء جولة
-        req.user.roundsPlayed = (req.user.roundsPlayed || 0) + 1;
-        // يمكنك إعطاء ضربات جديدة هنا أو إدارتها بشكل مختلف
-        // For now, let's assume strikes are consumed and not reset per round unless designed that way.
-        // For a new game, you might want to give some initial strikes if they are limited per session/game.
-        // req.user.autoPlayStrikes = 5; // مثال: إعطاء 5 ضربات تلقائية لكل جولة
-        // req.user.tripleStrikes = 1;
-        // req.user.hammerStrikes = 0;
+        const user = req.user; // المستخدم من الـ middleware
+        if (!user) {
+            console.log('Start Round Route: User not found after protect middleware'); // <-- log جديد
+            return res.status(401).json({ message: 'User not authenticated.' });
+        }
 
-        await req.user.save(); // حفظ التغييرات على المستخدم
+        // منطق اللعبة
+        const initialScore = 0;
+        const totalBoxes = 100; // عدد الصناديق الكلي
+        const initialBoxesState = generateInitialBoxes(totalBoxes); // توليد حالة الصناديق
+
+        user.currentRound = {
+            score: initialScore,
+            boxesState: initialBoxesState,
+            revealedBoxes: [],
+            strikesUsed: { autoPlay: 0, tripleStrike: 0, hammerStrike: 0 }
+        };
+        user.roundsPlayed = (user.roundsPlayed || 0) + 1; // زيادة عدد الجولات الملعوبة
+
+        // لا تنسى تحديث تاريخ آخر لعب
+        user.lastPlayed = new Date(); // تحديث تاريخ آخر لعب
+
+        await user.save();
+        console.log('Start Round Route: User saved successfully'); // <-- log جديد
 
         res.status(200).json({
-            message: 'New round started successfully!',
-            user: {
-                username: req.user.username,
-                totalScore: req.user.totalScore,
-                roundsPlayed: req.user.roundsPlayed,
-                autoPlayStrikes: req.user.autoPlayStrikes,
-                tripleStrikes: req.user.tripleStrikes,
-                hammerStrikes: req.user.hammerStrikes
+            message: 'جولة جديدة بدأت بنجاح!',
+            user: { // إرسال بيانات المستخدم المحدثة للواجهة الأمامية
+                username: user.username,
+                totalScore: user.totalScore,
+                roundsPlayed: user.roundsPlayed,
+                autoPlayStrikes: user.autoPlayStrikes,
+                tripleStrikes: user.tripleStrikes,
+                hammerStrikes: user.hammerStrikes,
+                isAdmin: user.isAdmin
+            },
+            roundData: {
+                currentRoundScore: user.currentRound.score,
+                // يمكنك إرسال معلومات أخرى عن الجولة إذا لزم الأمر
             }
         });
+        console.log('Start Round Route: Response sent'); // <-- log جديد
+
     } catch (error) {
-        console.error('Error starting new round:', error);
+        console.error('Start Round Route: Error:', error); // <-- log جديد
         res.status(500).json({ message: 'Server error starting new round.' });
     }
 });
 
-// **مسار الكشف عن الصندوق (POST /api/game/reveal-box)**
-router.post('/reveal-box', protect, async (req, res) => {
-    const { boxIndex } = req.body;
-    console.log(`User ${req.user.username} revealing box ${boxIndex}`);
-
-    // هنا يتم تطبيق منطق الكشف عن الصندوق
-    // يجب أن تكون القيم (نقاط الصندوق) مخزنة على الخادم، وليس في الواجهة الأمامية
-    // مثال بسيط: يمكن أن نحدد صندوق فائز واحد هنا
-    const WINNING_BOX_INDEX = 50; // افتراضياً، الصندوق رقم 51 هو الفائز (0-based index)
-    const WINNING_POINTS = 100;
-    const LOOSING_POINTS = -10; // نقاط سلبية
-    const NORMAL_POINTS = 5;
-
-    let pointsEarned = 0;
-    let message = 'تم الكشف عن الصندوق.';
-    let boxContent = null; // لمحتوى الصندوق (مثل مسار صورة)
-
-    // هذا المنطق يجب أن يكون أكثر تعقيداً في لعبة حقيقية (مثلاً، مصفوفة من المكافآت/العقوبات)
-    if (boxIndex === WINNING_BOX_INDEX) {
-        pointsEarned = WINNING_POINTS;
-        message = 'تهانينا! لقد وجدت الصندوق الذهبي!';
-        boxContent = 'gold_box.png'; // مثال: اسم ملف الصورة للمحتوى
-        // يمكنك هنا إنهاء الجولة أو إعطاء مكافأة خاصة
-    } else if (boxIndex % 7 === 0) { // مثال آخر: صناديق معينة تعطي نقاطاً سلبية
-        pointsEarned = LOOSING_POINTS;
-        message = 'أوه! لقد خسرت بعض النقاط.';
-        boxContent = 'bomb.png';
-    } else {
-        pointsEarned = NORMAL_POINTS;
-        message = `حصلت على ${NORMAL_POINTS} نقاط!`;
-        boxContent = 'coins.png';
+// منطق الكشف عن الصندوق الفردي (يمكن استخدامه من مسار 'reveal-box' أو مسار 'perform-action')
+// هذا كود مساعد ولا يحتاج لأن يكون مسار API
+async function revealBoxLogic(index, user) {
+    if (index < 0 || index >= user.currentRound.boxesState.length) {
+        throw new Error('Invalid box index.');
     }
 
-    try {
-        // تحديث نقاط المستخدم في قاعدة البيانات
-        req.user.totalScore = (req.user.totalScore || 0) + pointsEarned;
-        // يمكن أيضاً خصم "ضربة" من عدد الضربات المتبقية إذا كان الكشف يعتبر ضربة
-        // req.user.strikesRemaining--; // إذا كان لديك هذا الحقل
-        await req.user.save();
+    let box = user.currentRound.boxesState[index];
 
+    if (box.revealed) {
+        // إذا كان الصندوق مكشوفاً بالفعل، لا تفعل شيئاً أو أرسل رسالة مناسبة
+        return { message: 'الصندوق مكشوف بالفعل.', currentScore: 0, boxContent: null, gameOver: false };
+    }
+
+    box.revealed = true; // ضع علامة على الصندوق كمكشوف
+
+    let pointsEarned = box.value; // النقاط المكتسبة من هذا الصندوق
+    let content = null;
+    let isGameOver = false; // هل هذا الكشف ينهي اللعبة؟
+    let gameOverStatus = null; // 'success' or 'fail'
+
+    // تحديد محتوى الصندوق بناءً على نوعه
+    if (box.type === 'win') {
+        content = 'gold_box.png';
+        isGameOver = true; // الفوز ينهي الجولة
+        gameOverStatus = 'success';
+    } else if (box.type === 'bomb') {
+        content = 'bomb.png';
+        isGameOver = true; // القنبلة تنهي الجولة
+        gameOverStatus = 'fail';
+    } else { // normal box
+        content = 'normal_box.png'; // أو أي صورة افتراضية
+    }
+
+    user.currentRound.score += pointsEarned; // أضف النقاط إلى نقاط الجولة الحالية
+    user.totalScore += pointsEarned; // أضف النقاط إلى النقاط الكلية
+    user.currentRound.revealedBoxes.push(index); // تتبع الصناديق المكشوفة
+
+    // حفظ التغييرات في قاعدة البيانات
+    await user.save();
+
+    return {
+        message: `لقد كشفت صندوق ${box.type === 'win' ? 'الفوز!' : box.type === 'bomb' ? 'القنبلة!' : 'عادي'}. النقاط: ${pointsEarned}`,
+        currentScore: pointsEarned,
+        boxContent: content,
+        gameOver: isGameOver,
+        gameOverStatus: gameOverStatus
+    };
+}
+
+
+// **مسار الكشف عن الصندوق (POST /api/game/reveal-box)**
+router.post('/reveal-box', protect, async (req, res) => {
+    console.log('Reveal Box Route: Entered handler'); // <-- log جديد
+    const { boxIndex } = req.body;
+
+    try {
+        const user = req.user;
+        if (!user || !user.currentRound || !user.currentRound.boxesState) {
+            console.log('Reveal Box Route: User or current round data missing'); // <-- log جديد
+            return res.status(400).json({ message: 'Game not started or round data missing.' });
+        }
+
+        // تحقق مما إذا كان الصندوق مكشوفاً بالفعل
+        if (user.currentRound.revealedBoxes.includes(boxIndex)) {
+            console.log('Reveal Box Route: Box already revealed', boxIndex); // <-- log جديد
+            return res.status(400).json({ message: 'هذا الصندوق تم كشفه بالفعل.' });
+        }
+
+        const result = await revealBoxLogic(boxIndex, user);
+        console.log('Reveal Box Route: Logic executed, sending response', result); // <-- log جديد
         res.status(200).json({
-            message: message,
-            currentScore: pointsEarned, // هذه هي النقاط التي حصل عليها من هذا الصندوق
-            user: { // إرسال بيانات المستخدم المحدثة للواجهة الأمامية
-                username: req.user.username,
-                totalScore: req.user.totalScore,
-                roundsPlayed: req.user.roundsPlayed,
-                autoPlayStrikes: req.user.autoPlayStrikes,
-                tripleStrikes: req.user.tripleStrikes,
-                hammerStrikes: req.user.hammerStrikes
+            message: result.message,
+            currentScore: result.currentScore,
+            boxContent: result.boxContent,
+            user: { // إرسال بيانات المستخدم المحدثة
+                username: user.username,
+                totalScore: user.totalScore,
+                roundsPlayed: user.roundsPlayed,
+                autoPlayStrikes: user.autoPlayStrikes,
+                tripleStrikes: user.tripleStrikes,
+                hammerStrikes: user.hammerStrikes,
+                isAdmin: user.isAdmin
             },
-            boxContent: boxContent, // إرسال محتوى الصندوق
-            gameOver: false // إذا لم تكن هذه الضربة تنهي اللعبة
+            gameOver: result.gameOver,
+            gameOverStatus: result.gameOverStatus
         });
 
     } catch (error) {
-        console.error('Error revealing box:', error);
+        console.error('Reveal Box Route: Error:', error); // <-- log جديد
         res.status(500).json({ message: 'Server error revealing box.' });
     }
 });
 
-
 // **مسار جمع النقاط (POST /api/game/collect-points)**
 router.post('/collect-points', protect, async (req, res) => {
-    const { currentRoundScore } = req.body;
-    console.log(`User ${req.user.username} collecting ${currentRoundScore} points.`);
-
+    console.log('Collect Points Route: Entered handler'); // <-- log جديد
     try {
-        // في هذا المسار، نفترض أن النقاط التي تم كسبها بالفعل في الجولة
-        // تم تحديثها في 'totalScore' في مسار 'reveal-box'
-        // لذا، هنا قد لا تحتاج إلى إضافة نقاط مرة أخرى، بل فقط تأكيد
-        // أو يمكنك هنا تحويل نقاط الجولة المؤقتة إلى نقاط دائمة إذا لم يتم ذلك في 'reveal-box'
-        // للحفاظ على البساطة، سنفترض أنها تم إضافتها بالفعل.
-        // إذا كنت تدير النقاط بشكل مختلف، فقد تحتاج إلى:
-        // req.user.totalScore = (req.user.totalScore || 0) + currentRoundScore;
+        const user = req.user;
 
-        await req.user.save(); // حفظ أي تغييرات محتملة أخرى
+        if (!user || !user.currentRound) {
+            console.log('Collect Points Route: User or current round data missing'); // <-- log جديد
+            return res.status(400).json({ message: 'No active game to collect points from.' });
+        }
+
+        // لا تحتاج لـ currentRoundScore في الـ body، لأنه موجود في user.currentRound.score
+        const collectedScore = user.currentRound.score;
+
+        if (collectedScore === 0) {
+            console.log('Collect Points Route: No points to collect'); // <-- log جديد
+            return res.status(400).json({ message: 'لا توجد نقاط لجمعها في هذه الجولة.' });
+        }
+
+        // تم بالفعل تحديث totalScore و currentRound.score في revealBoxLogic
+        // هنا نقوم بإنهاء الجولة وإعادة تعيين currentRound
+        user.currentRound = {
+            score: 0,
+            boxesState: [],
+            revealedBoxes: [],
+            strikesUsed: { autoPlay: 0, tripleStrike: 0, hammerStrike: 0 }
+        };
+
+        await user.save();
+        console.log('Collect Points Route: Points collected and user saved'); // <-- log جديد
 
         res.status(200).json({
-            message: `تم جمع ${currentRoundScore} نقطة بنجاح!`,
-            user: { // إرسال بيانات المستخدم المحدثة
-                username: req.user.username,
-                totalScore: req.user.totalScore,
-                roundsPlayed: req.user.roundsPlayed,
-                autoPlayStrikes: req.user.autoPlayStrikes,
-                tripleStrikes: req.user.tripleStrikes,
-                hammerStrikes: req.user.hammerStrikes
-            }
+            message: `تم جمع ${collectedScore} نقطة بنجاح!`,
+            user: {
+                username: user.username,
+                totalScore: user.totalScore,
+                roundsPlayed: user.roundsPlayed,
+                autoPlayStrikes: user.autoPlayStrikes,
+                tripleStrikes: user.tripleStrikes,
+                hammerStrikes: user.hammerStrikes,
+                isAdmin: user.isAdmin
+            },
+            collectedScore: collectedScore
         });
+        console.log('Collect Points Route: Response sent'); // <-- log جديد
+
     } catch (error) {
-        console.error('Error collecting points:', error);
+        console.error('Collect Points Route: Error:', error); // <-- log جديد
         res.status(500).json({ message: 'Server error collecting points.' });
     }
 });
@@ -161,170 +252,154 @@ router.post('/collect-points', protect, async (req, res) => {
 
 // **مسار تنفيذ إجراء اللعبة (الضربات: تلقائي، ثلاثية، مطرقة) (POST /api/game/perform-action)**
 router.post('/perform-action', protect, async (req, res) => {
+    console.log('Perform Action Route: Entered handler'); // <-- log جديد
     const { actionType } = req.body;
-    console.log(`User ${req.user.username} performing action: ${actionType}`);
-
-    let message = '';
-    let revealedBoxes = []; // مصفوفة لتخزين مؤشرات الصناديق التي تم كشفها
-    let pointsEarnedFromAction = 0; // النقاط التي تم الحصول عليها من هذا الإجراء بالذات
-    let boxContents = {}; // محتوى الصناديق (إذا كانت صوراً مثلاً)
-    let gameOver = false;
+    let revealedIndexes = []; // لتتبع الصناديق التي تم كشفها بهذا الإجراء
+    let totalPointsEarned = 0;
+    let newBoxContents = {}; // لتخزين محتوى الصناديق الجديدة
+    let isGameOver = false;
     let gameOverStatus = null;
 
     try {
+        const user = req.user;
+        if (!user || !user.currentRound || !user.currentRound.boxesState) {
+            console.log('Perform Action Route: User or current round data missing'); // <-- log جديد
+            return res.status(400).json({ message: 'Game not started or round data missing.' });
+        }
+
         switch (actionType) {
             case 'autoPlay':
-                if (req.user.autoPlayStrikes <= 0) {
-                    return res.status(400).json({ message: 'لا يوجد لديك ضربات تلقائية متبقية.' });
+                if (user.autoPlayStrikes <= 0) {
+                    console.log('Perform Action Route: No autoPlay strikes left'); // <-- log جديد
+                    return res.status(400).json({ message: 'لا توجد ضربات تلقائية متبقية.' });
                 }
-                req.user.autoPlayStrikes--;
-                message = 'تم تنفيذ الضربة التلقائية! كشفت صندوقاً عشوائياً.';
-                // منطق الضربة التلقائية: كشف صندوق عشوائي غير مكشوف
-                const availableBoxes = await findUnrevealedBoxes(); // ستحتاج إلى دالة للعثور على الصناديق غير المكشوفة
-                if (availableBoxes.length > 0) {
-                    const randomIndex = availableBoxes[Math.floor(Math.random() * availableBoxes.length)];
-                    revealedBoxes.push(randomIndex);
-                    const { points, content, isGameOver } = await revealBoxLogic(randomIndex, req.user); // منطق الكشف
-                    pointsEarnedFromAction += points;
-                    boxContents[randomIndex] = content;
-                    if (isGameOver) { gameOver = true; gameOverStatus = 'fail'; } // مثال: إذا كان الصندوق ينهي اللعبة
-                } else {
-                    message = 'لا توجد صناديق متاحة للكشف التلقائي.';
-                    // قد لا تحتاج هنا لخصم الضربة إذا لم يتم الكشف فعلياً
+                // ابحث عن صندوق غير مكشوف بشكل عشوائي وكشفه
+                const unrevealedBoxes = user.currentRound.boxesState.filter(box => !box.revealed);
+                if (unrevealedBoxes.length === 0) {
+                    console.log('Perform Action Route: No unrevealed boxes for autoPlay'); // <-- log جديد
+                    return res.status(400).json({ message: 'لا توجد صناديق غير مكشوفة لتشغيل الضربة التلقائية.' });
                 }
+                const randomIndex = Math.floor(Math.random() * unrevealedBoxes.length);
+                const boxToReveal = unrevealedBoxes[randomIndex];
+                const resultAuto = await revealBoxLogic(boxToReveal.index, user);
+                totalPointsEarned = resultAuto.currentScore;
+                revealedIndexes.push(boxToReveal.index);
+                newBoxContents[boxToReveal.index] = resultAuto.boxContent;
+                isGameOver = resultAuto.gameOver;
+                gameOverStatus = resultAuto.gameOverStatus;
+                user.autoPlayStrikes--;
                 break;
 
             case 'tripleStrike':
-                if (req.user.tripleStrikes <= 0) {
-                    return res.status(400).json({ message: 'لا يوجد لديك ضربات ثلاثية متبقية.' });
+                if (user.tripleStrikes <= 0) {
+                    console.log('Perform Action Route: No triple strikes left'); // <-- log جديد
+                    return res.status(400).json({ message: 'لا توجد ضربات ثلاثية متبقية.' });
                 }
-                req.user.tripleStrikes--;
-                message = 'تم تنفيذ الضربة الثلاثية! كشفت 3 صناديق عشوائياً.';
-                // منطق الضربة الثلاثية: كشف 3 صناديق عشوائية غير مكشوفة
-                const availableBoxesTriple = await findUnrevealedBoxes();
-                const numToReveal = Math.min(3, availableBoxesTriple.length);
-                for (let i = 0; i < numToReveal; i++) {
-                    const randomIndex = availableBoxesTriple.splice(Math.floor(Math.random() * availableBoxesTriple.length), 1)[0];
-                    revealedBoxes.push(randomIndex);
-                    const { points, content, isGameOver } = await revealBoxLogic(randomIndex, req.user);
-                    pointsEarnedFromAction += points;
-                    boxContents[randomIndex] = content;
-                    if (isGameOver) { gameOver = true; gameOverStatus = 'fail'; }
+                // كشف 3 صناديق عشوائية غير مكشوفة
+                const unrevealedForTriple = user.currentRound.boxesState.filter(box => !box.revealed);
+                if (unrevealedForTriple.length < 3) {
+                     console.log('Perform Action Route: Not enough unrevealed boxes for tripleStrike'); // <-- log جديد
+                    return res.status(400).json({ message: 'لا توجد صناديق كافية غير مكشوفة للضربة الثلاثية.' });
                 }
+                for (let i = 0; i < 3; i++) {
+                    const randomTripleIndex = Math.floor(Math.random() * unrevealedForTriple.length);
+                    const tripleBoxToReveal = unrevealedForTriple.splice(randomTripleIndex, 1)[0]; // إزالة الصندوق المختار
+                    const resultTriple = await revealBoxLogic(tripleBoxToReveal.index, user);
+                    totalPointsEarned += resultTriple.currentScore;
+                    revealedIndexes.push(tripleBoxToReveal.index);
+                    newBoxContents[tripleBoxToReveal.index] = resultTriple.boxContent;
+                    if (resultTriple.gameOver) { isGameOver = true; gameOverStatus = resultTriple.gameOverStatus; }
+                }
+                user.tripleStrikes--;
                 break;
 
             case 'hammerStrike':
-                if (req.user.hammerStrikes <= 0) {
-                    return res.status(400).json({ message: 'لا يوجد لديك ضربات مطرقة متبقية.' });
+                if (user.hammerStrikes <= 0) {
+                    console.log('Perform Action Route: No hammer strikes left'); // <-- log جديد
+                    return res.status(400).json({ message: 'لا توجد ضربات مطرقة متبقية.' });
                 }
-                req.user.hammerStrikes--;
-                message = 'تم تنفيذ ضربة المطرقة! كشفت صندوق الفوز (إذا كان موجوداً).';
-                // منطق ضربة المطرقة: كشف الصندوق الفائز (افتراضاً)
-                const WINNING_BOX_INDEX = 50; // يجب أن يتم تعريف هذا بشكل مركزي
-                const { points, content, isGameOver } = await revealBoxLogic(WINNING_BOX_INDEX, req.user);
-                revealedBoxes.push(WINNING_BOX_INDEX);
-                pointsEarnedFromAction += points;
-                boxContents[WINNING_BOX_INDEX] = content;
-                if (isGameOver) { gameOver = true; gameOverStatus = 'success'; } // المطرقة تنهي اللعبة بنجاح
+                // كشف الصندوق الأقل قيمة (إذا كان هناك واحد)
+                const unrevealedForHammer = user.currentRound.boxesState.filter(box => !box.revealed);
+                if (unrevealedForHammer.length === 0) {
+                     console.log('Perform Action Route: No unrevealed boxes for hammerStrike'); // <-- log جديد
+                    return res.status(400).json({ message: 'لا توجد صناديق غير مكشوفة لضربة المطرقة.' });
+                }
+                // ابحث عن الصندوق الذي يحتوي على أقل قيمة (أو القنبلة إذا كانت موجودة)
+                // بناءً على منطق generateInitialBoxes، القنبلة هي -10
+                let minValBox = unrevealedForHammer[0];
+                for(let i=1; i<unrevealedForHammer.length; i++) {
+                    if (unrevealedForHammer[i].value < minValBox.value) {
+                        minValBox = unrevealedForHammer[i];
+                    }
+                }
+                const resultHammer = await revealBoxLogic(minValBox.index, user);
+                totalPointsEarned = resultHammer.currentScore;
+                revealedIndexes.push(minValBox.index);
+                newBoxContents[minValBox.index] = resultHammer.boxContent;
+                isGameOver = resultHammer.gameOver;
+                gameOverStatus = resultHammer.gameOverStatus;
+                user.hammerStrikes--;
                 break;
 
             default:
-                return res.status(400).json({ message: 'نوع إجراء غير صالح.' });
+                console.log('Perform Action Route: Invalid action type', actionType); // <-- log جديد
+                return res.status(400).json({ message: 'نوع الإجراء غير صالح.' });
         }
 
-        req.user.totalScore = (req.user.totalScore || 0) + pointsEarnedFromAction; // إضافة النقاط المكتسبة من الإجراء
-        await req.user.save(); // حفظ التغييرات على المستخدم
+        // حفظ التغييرات في قاعدة البيانات بعد استخدام الضربة
+        await user.save();
+        console.log('Perform Action Route: Action executed and user saved'); // <-- log جديد
 
         res.status(200).json({
-            message: message,
-            user: { // إرسال بيانات المستخدم المحدثة
-                username: req.user.username,
-                totalScore: req.user.totalScore,
-                roundsPlayed: req.user.roundsPlayed,
-                autoPlayStrikes: req.user.autoPlayStrikes,
-                tripleStrikes: req.user.tripleStrikes,
-                hammerStrikes: req.user.hammerStrikes
+            message: `تم تنفيذ ${actionType} بنجاح!`,
+            user: {
+                username: user.username,
+                totalScore: user.totalScore,
+                roundsPlayed: user.roundsPlayed,
+                autoPlayStrikes: user.autoPlayStrikes,
+                tripleStrikes: user.tripleStrikes,
+                hammerStrikes: user.hammerStrikes,
+                isAdmin: user.isAdmin
             },
-            revealedBoxes: revealedBoxes, // إرسال مؤشرات الصناديق التي تم كشفها
-            boxContents: boxContents, // محتويات هذه الصناديق
-            currentScore: pointsEarnedFromAction, // النقاط التي حصل عليها من هذه الضربة
-            gameOver: gameOver,
+            revealedBoxes: revealedIndexes, // إرجاع مؤشرات الصناديق التي تم كشفها
+            boxContents: newBoxContents,   // إرجاع محتوى الصناديق المكتشفة
+            currentScore: totalPointsEarned, // النقاط المكتسبة من هذه الضربة
+            gameOver: isGameOver,
             gameOverStatus: gameOverStatus
         });
+        console.log('Perform Action Route: Response sent'); // <-- log جديد
 
     } catch (error) {
-        console.error(`Error performing ${actionType} action:`, error);
-        res.status(500).json({ message: `Server error performing ${actionType} action.` });
+        console.error('Perform Action Route: Error:', error); // <-- log جديد
+        res.status(500).json({ message: 'Server error performing action.' });
     }
 });
 
 
 // **مسار إعادة تعيين اللعبة (للمشرفين فقط) (POST /api/admin/reset-game)**
-// هذا المسار يجب أن يتم استدعاؤه فقط من قبل المشرفين
 router.post('/admin/reset-game', protect, admin, async (req, res) => {
+    console.log('Admin Reset Game Route: Entered handler'); // <-- log جديد
     try {
-        // إعادة تعيين نقاط جميع المستخدمين إلى 0 (أو القيم الافتراضية)
+        // إعادة تعيين نقاط وضربات جميع المستخدمين
         await User.updateMany({}, {
             totalScore: 0,
             roundsPlayed: 0,
-            autoPlayStrikes: 0, // يمكنك وضع قيم افتراضية مختلفة هنا
-            tripleStrikes: 0,
-            hammerStrikes: 0
-            // لا تعيد تعيين isAdmin أو كلمة المرور أو اسم المستخدم
+            autoPlayStrikes: 3, // عدد البدء
+            tripleStrikes: 2,   // عدد البدء
+            hammerStrikes: 1,   // عدد البدء
+            currentRound: {
+                score: 0,
+                boxesState: [],
+                revealedBoxes: [],
+                strikesUsed: { autoPlay: 0, tripleStrike: 0, hammerStrike: 0 }
+            }
         });
-        res.status(200).json({ message: 'Game data reset for all users successfully!' });
+        console.log('Admin Reset Game Route: All users reset successfully'); // <-- log جديد
+        res.status(200).json({ message: 'تمت إعادة تعيين بيانات اللعبة لجميع المستخدمين بنجاح!' });
     } catch (error) {
-        console.error('Error resetting game data:', error);
+        console.error('Admin Reset Game Route: Error:', error); // <-- log جديد
         res.status(500).json({ message: 'Server error resetting game data.' });
     }
 });
 
 module.exports = router;
-
-
-// ----------------------------------------------------
-// **وظائف مساعدة داخلية (ليست مسارات API)**
-// يمكنك وضعها في ملف منفصل (مثل utils/gameLogic.js) إذا أصبحت كبيرة
-// ولكن لتبسيط الأمر، يمكن أن تكون هنا مؤقتاً
-
-// وظيفة للعثور على الصناديق غير المكشوفة (افتراضياً 100 صندوق)
-// في لعبة حقيقية، يجب أن يتم تخزين حالة الصناديق (مكشوفة/غير مكشوفة، محتواها) في قاعدة البيانات لكل جولة/مستخدم.
-// حالياً، سنفترض أننا نختار عشوائياً من 0 إلى 99.
-async function findUnrevealedBoxes() {
-    // هذا الجزء سيعتمد على كيفية تخزين حالة اللعبة (الصناديق المكشوفة) في قاعدة البيانات.
-    // إذا كنت لا تخزنها في قاعدة البيانات لكل جولة، فهذا مجرد اختيار عشوائي.
-    // لغرض التجربة، سنعيد قائمة من جميع المؤشرات الممكنة ونفترض أن الواجهة الأمامية تتعامل مع المكشوف منها.
-    const allBoxIndexes = Array.from({ length: 100 }, (_, i) => i);
-    return allBoxIndexes; // في تطبيق حقيقي، ستتم تصفية هذه القائمة بناءً على الصناديق المكشوفة في قاعدة البيانات
-}
-
-// منطق الكشف عن الصندوق الفردي (يمكن استخدامه من مسار 'reveal-box' أو مسار 'perform-action')
-async function revealBoxLogic(index, user) {
-    const WINNING_BOX_INDEX = 50; // افتراضياً، الصندوق رقم 51
-    const WINNING_POINTS = 100;
-    const LOOSING_POINTS = -10;
-    const NORMAL_POINTS = 5;
-
-    let pointsEarned = 0;
-    let content = null;
-    let isGameOver = false; // هل هذا الكشف ينهي اللعبة؟
-
-    if (index === WINNING_BOX_INDEX) {
-        pointsEarned = WINNING_POINTS;
-        content = 'gold_box.png';
-        isGameOver = true; // يمكن اعتبار العثور على الفائز ينهي الجولة بنجاح
-    } else if (index % 7 === 0) {
-        pointsEarned = LOOSING_POINTS;
-        content = 'bomb.png';
-        // isGameOver = true; // يمكن اعتبار خسارة نقاط معينة تنهي اللعبة بخسارة
-    } else {
-        pointsEarned = NORMAL_POINTS;
-        content = 'coins.png';
-    }
-
-    // هنا يمكنك تحديث نقاط المستخدم مؤقتًا
-    // user.totalScore = (user.totalScore || 0) + pointsEarned;
-    // (ملاحظة: حفظ المستخدم سيتم في المسار الرئيسي)
-
-    return { points: pointsEarned, content: content, isGameOver: isGameOver };
-}
