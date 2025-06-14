@@ -1,91 +1,113 @@
 // backend/routes/auth.js
 const express = require('express');
 const router = express.Router();
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User'); // تأكد من المسار الصحيح لنموذج المستخدم
+const bcrypt = require('bcryptjs'); // لتشفير وفك تشفير كلمات المرور
+const jwt = require('jsonwebtoken'); // لإنشاء الرموز (Tokens)
+const User = require('../models/User'); // تأكد من أن هذا المسار صحيح لملف نموذج المستخدم الخاص بك (User model)
 
-const JWT_SECRET = process.env.JWT_SECRET; // تأكد أن هذا المتغير متاح في Render
-
-console.log('Auth routes module loaded.'); // تأكيد تحميل مسارات auth
-
-// مسار التسجيل (Register Route)
+// **مسار التسجيل (POST /api/auth/register)**
 router.post('/register', async (req, res) => {
-    const { username, email, password } = req.body;
-    console.log('Attempting registration for:', username, email); // سجل محاولة التسجيل
+    console.log('Register request body received:', req.body); // طباعة البيانات المستلمة للتسجيل
+
+    const { username, email, password } = req.body; // <-- تأكد من مطابقة هذه الأسماء لمدخلات الواجهة الأمامية
+
+    // التحقق من وجود جميع الحقول المطلوبة
+    if (!username || !email || !password) {
+        return res.status(400).json({ message: 'Please enter all fields.' });
+    }
+
     try {
-        let user = await User.findOne({ email });
+        // التحقق مما إذا كان اسم المستخدم أو البريد الإلكتروني موجودين بالفعل
+        let user = await User.findOne({ username });
         if (user) {
-            return res.status(400).json({ message: 'User already exists with this email' });
+            return res.status(409).json({ message: 'Username already exists.' });
         }
-        user = await User.findOne({ username });
+        user = await User.findOne({ email });
         if (user) {
-            return res.status(400).json({ message: 'Username is already taken' });
+            return res.status(409).json({ message: 'Email already exists.' });
         }
-        user = new User({ username, email, password });
+
+        // تشفير كلمة المرور
         const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(password, salt);
-        await user.save();
-        const payload = { user: { id: user.id } };
-        jwt.sign(
-            payload,
-            JWT_SECRET,
-            { expiresIn: '1h' },
-            (err, token) => {
-                if (err) throw err;
-                res.status(201).json({ message: 'User registered successfully', token, isAdmin: user.isAdmin });
-            }
-        );
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // إنشاء مستخدم جديد
+        user = new User({
+            username,
+            email,
+            password: hashedPassword,
+            isAdmin: false // افتراضيًا، المستخدم الجديد ليس مشرفًا
+        });
+
+        await user.save(); // حفظ المستخدم في قاعدة البيانات
+
+        res.status(201).json({ message: 'User registered successfully!' });
+
     } catch (err) {
         console.error('Registration error:', err.message);
-        res.status(500).send('Server error during registration');
+        res.status(500).json({ message: 'Server error during registration.' });
     }
 });
 
-// مسار تسجيل الدخول (Login Route)
+
+// **مسار تسجيل الدخول (POST /api/auth/login)**
 router.post('/login', async (req, res) => {
-    console.log('Attempting login for:', req.body.identifier); // سجل محاولة تسجيل الدخول
-    // الآن نستقبل حقل واحد يمكن أن يكون إما بريد إلكتروني أو اسم مستخدم
-    const { identifier, password } = req.body;
+    console.log('Login request body received:', req.body); // **هذا السطر مهم جداً للتصحيح!**
+
+    // **هنا يتم استخراج اسم المستخدم وكلمة المرور من جسم الطلب**
+    // **تأكد أن "username" و "password" هنا يطابقان تماماً ما ترسله الواجهة الأمامية.**
+    const { username, password } = req.body;
+
+    // التحقق من أن الحقول ليست فارغة
+    if (!username || !password) {
+        return res.status(400).json({ message: 'Please enter all fields.' });
+    }
 
     try {
-        let user;
-        // محاولة العثور على المستخدم بالبريد الإلكتروني أولاً
-        user = await User.findOne({ email: identifier });
+        // البحث عن المستخدم في قاعدة البيانات باستخدام اسم المستخدم
+        // **تأكد أنك تبحث عن الحقل الصحيح في نموذج المستخدم (عادةً 'username' أو 'email')**
+        const user = await User.findOne({ username: username });
 
-        // إذا لم يتم العثور عليه بالبريد الإلكتروني، حاول باسم المستخدم
         if (!user) {
-            user = await User.findOne({ username: identifier });
+            // إذا لم يتم العثور على المستخدم، أرجع رسالة خطأ
+            return res.status(400).json({ message: 'Invalid credentials: User not found.' });
         }
 
-        // إذا لم يتم العثور على المستخدم على الإطلاق
-        if (!user) {
-            console.log('Login failed: User not found for identifier', identifier);
-            return res.status(400).json({ message: 'بيانات اعتماد غير صحيحة' });
-        }
-
-        // التحقق من كلمة المرور
+        // مقارنة كلمة المرور المدخلة بكلمة المرور المشفرة في قاعدة البيانات
         const isMatch = await bcrypt.compare(password, user.password);
+
         if (!isMatch) {
-            console.log('Login failed: Password mismatch for user', user.username);
-            return res.status(400).json({ message: 'بيانات اعتماد غير صحيحة' });
+            // إذا لم تتطابق كلمات المرور، أرجع رسالة خطأ
+            return res.status(400).json({ message: 'Invalid credentials: Password incorrect.' });
         }
 
-        // إنشاء الـ Token
-        const payload = { user: { id: user.id } };
+        // إذا تم التحقق بنجاح، قم بإنشاء رمز JWT
+        const payload = {
+            user: {
+                id: user.id,
+                username: user.username,
+                isAdmin: user.isAdmin // لتمرير حالة الإدارة
+            }
+        };
+
         jwt.sign(
             payload,
-            JWT_SECRET,
-            { expiresIn: '1h' },
+            process.env.JWT_SECRET, // تأكد من تعريف JWT_SECRET في ملف .env
+            { expiresIn: '1h' }, // صلاحية الرمز لساعة واحدة
             (err, token) => {
                 if (err) throw err;
-                // إرجاع التوكن، وisAdmin، واسم المستخدم
-                res.json({ message: 'تم تسجيل الدخول بنجاح', token, isAdmin: user.isAdmin, username: user.username });
+                res.status(200).json({
+                    message: 'Login successful!',
+                    token,
+                    username: user.username,
+                    isAdmin: user.isAdmin
+                });
             }
         );
+
     } catch (err) {
-        console.error('Login error:', err.message);
-        res.status(500).send('Server error during login');
+        console.error('Login error:', err.message); // سجل الخطأ الكامل هنا
+        res.status(500).json({ message: 'Server error during login.' });
     }
 });
 
