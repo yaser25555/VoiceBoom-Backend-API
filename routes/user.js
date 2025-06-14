@@ -9,7 +9,6 @@ const Setting = require('../models/Setting'); // لاستيراد إعدادات
 router.get('/data', authMiddleware, async (req, res) => {
     console.log('GET /api/user/data: الطلب بدأ.');
     try {
-        // req.user.id يتم ملؤها بواسطة authMiddleware
         const user = await User.findById(req.user.id).select('-password');
         
         console.log('GET /api/user/data: تم جلب المستخدم من قاعدة البيانات.');
@@ -20,118 +19,126 @@ router.get('/data', authMiddleware, async (req, res) => {
         
         console.log('GET /api/user/data: بيانات المستخدم جاهزة للإرسال:', {
             username: user.username,
-            score: user.score,
-            level: user.level,
-            attempts: user.attempts,
+            playerCoins: user.playerCoins,
+            luckyPoints: user.luckyPoints,
+            roundsPlayed: user.roundsPlayed,
             isAdmin: user.isAdmin
         });
         
         res.json({
             username: user.username,
-            score: user.score,
-            level: user.level,
-            attempts: user.attempts,
+            playerCoins: user.playerCoins,
+            luckyPoints: user.luckyPoints,
+            roundsPlayed: user.roundsPlayed,
             isAdmin: user.isAdmin
         });
     } catch (err) {
-        console.error('GET /api/user/data: خطأ في الخادم:', err.message);
+        console.error(err.message);
         res.status(500).json({ message: 'Server error fetching user data', error: err.message });
     }
 });
 
-// مسار لتنفيذ إجراءات اللعبة (تلقائي، ضربة ثلاثية، ضربة المطرقة)
-router.post('/action', authMiddleware, async (req, res) => {
-    const { action } = req.body;
-    console.log(`POST /api/user/action: طلب إجراء اللعبة - ${action} بدأ.`);
+// دالة مساعدة لعمليات اللعب
+async function handleGameAction(req, res, actionType) {
+    console.log(`POST /api/user/${actionType}: طلب بدأ.`);
     try {
         const user = await User.findById(req.user.id);
         if (!user) {
-            console.log('POST /api/user/action: المستخدم غير موجود (404).');
+            console.log(`POST /api/user/${actionType}: المستخدم غير موجود (404).`);
             return res.status(404).json({ message: 'User not found' });
         }
 
-        const settings = await Setting.findOne();
-        if (!settings) {
-            console.error('POST /api/user/action: إعدادات اللعبة غير موجودة في قاعدة البيانات!');
-            return res.status(500).json({ message: 'Game settings not found' });
+        const settingsDoc = await Setting.findOne({ name: 'gameConfig' });
+        if (!settingsDoc || !settingsDoc.value) {
+            console.error(`POST /api/user/${actionType}: إعدادات اللعبة غير موجودة في قاعدة البيانات!`);
+            return res.status(500).json({ message: 'Game settings not found or invalid' });
         }
+        const settings = settingsDoc.value; // الوصول إلى كائن الإعدادات الفعلية
 
-        const { basePrize, minAttempts, maxAttempts, levelUpBonus, maxScore, maxLevel, initialAttempts } = settings;
-
-        if (user.attempts <= 0) {
-            console.log('POST /api/user/action: محاولات المستخدم انتهت.');
-            return res.status(400).json({ message: 'No attempts left. Reset game or contact admin.' });
-        }
-
-        user.attempts -= 1; // خصم محاولة واحدة
-
-        let prizeAmount = 0;
         let message = '';
-        const random = Math.random();
+        let prizeAmount = 0;
+        let prizeType = 'coins'; // الافتراضي هو عملات
+        let cost = 0;
 
-        switch (action) {
-            case 'auto':
-                if (random < 0.4) { // 40% فرصة للفوز بـ 0.5x - 1x
-                    prizeAmount = Math.floor(basePrize * (0.5 + Math.random() * 0.5));
-                } else { // 60% فرصة لخسارة 0.2x
-                    prizeAmount = -Math.floor(basePrize * 0.2);
+        switch (actionType) {
+            case 'auto-play':
+                cost = settings.autoPlayCost || 20;
+                if (user.playerCoins < cost) {
+                    return res.status(400).json({ message: 'لا يوجد لديك عملات كافية للعب التلقائي!', playerCoins: user.playerCoins, luckyPoints: user.luckyPoints, roundsPlayed: user.roundsPlayed });
                 }
+                user.playerCoins -= cost;
+                prizeAmount = Math.floor(Math.random() * (settings.autoPlayRewardMax - settings.autoPlayRewardMin + 1)) + settings.autoPlayRewardMin;
+                user.playerCoins += prizeAmount;
+                message = `لعب تلقائي: فزت بـ ${prizeAmount} عملة!`;
                 break;
-            case 'tripleStrike':
-                if (random < 0.6) { // 60% فرصة للفوز بـ 1x - 2x
-                    prizeAmount = Math.floor(basePrize * (1 + Math.random()));
-                } else { // 40% فرصة لخسارة 0.3x
-                    prizeAmount = -Math.floor(basePrize * 0.3);
+
+            case 'triple-strike':
+                cost = settings.tripleStrikeCost || 30;
+                if (user.playerCoins < cost) {
+                    return res.status(400).json({ message: 'لا يوجد لديك عملات كافية للضربة الثلاثية!', playerCoins: user.playerCoins, luckyPoints: user.luckyPoints, roundsPlayed: user.roundsPlayed });
                 }
+                user.playerCoins -= cost;
+                prizeAmount = settings.tripleStrikeReward || 100;
+                user.playerCoins += prizeAmount;
+                message = `ضربة ثلاثية: فزت بـ ${prizeAmount} عملة!`;
                 break;
-            case 'hammerStrike':
-                if (random < 0.8) { // 80% فرصة للفوز بـ 1.5x - 3x
-                    prizeAmount = Math.floor(basePrize * (1.5 + Math.random() * 1.5));
-                } else { // 20% فرصة لخسارة 0.5x
-                    prizeAmount = -Math.floor(basePrize * 0.5);
+
+            case 'hammer-strike':
+                cost = settings.hammerStrikeCost || 5; // تكلفة نقاط الحظ
+                if (user.luckyPoints < cost) {
+                    return res.status(400).json({ message: 'لا يوجد لديك نقاط حظ كافية لضربة المطرقة!', playerCoins: user.playerCoins, luckyPoints: user.luckyPoints, roundsPlayed: user.roundsPlayed });
                 }
+                user.luckyPoints -= cost;
+                prizeAmount = settings.hammerStrikeReward || 500;
+                user.playerCoins += prizeAmount;
+                message = `ضربة المطرقة: فزت بـ ${prizeAmount} عملة ضخمة!`;
                 break;
+
             default:
-                console.log('POST /api/user/action: إجراء غير صالح.');
-                return res.status(400).json({ message: 'Invalid action type' });
+                return res.status(400).json({ message: 'نوع الإجراء غير صالح.' });
         }
 
-        user.score += prizeAmount;
-        message = `حصلت على ${prizeAmount} نقطة!`;
+        // التأكد من عدم نزول العملات/النقاط عن الصفر
+        if (user.playerCoins < 0) user.playerCoins = 0;
+        if (user.luckyPoints < 0) user.luckyPoints = 0;
 
-        // التأكد من عدم نزول النقاط عن الصفر
-        if (user.score < 0) user.score = 0;
+        user.roundsPlayed += 1;
 
-        // منطق رفع المستوى
-        if (user.score >= maxScore && user.level < maxLevel) {
-            user.level += 1;
-            user.score = 0; // إعادة تعيين النقاط للمستوى الجديد
-            user.attempts = initialAttempts; // إعادة تعيين المحاولات للمستوى الجديد
-            message += ` لقد وصلت إلى المستوى ${user.level} الجديد!`;
-        }
+        // إضافة تفاصيل الجولة إلى personalScores
+        user.personalScores.push({
+            round: user.roundsPlayed,
+            score: prizeAmount,
+            prize: actionType,
+            date: new Date()
+        });
 
         await user.save();
-        console.log(`POST /api/user/action: تم حفظ بيانات المستخدم بنجاح. بيانات جديدة:`, {
-            score: user.score, level: user.level, attempts: user.attempts
-        });
+        console.log(`POST /api/user/${actionType}: تم تحديث بيانات المستخدم بنجاح.`);
 
         res.json({
             message: message,
-            score: user.score,
-            level: user.level,
-            attempts: user.attempts,
-            isAdmin: user.isAdmin
+            playerCoins: user.playerCoins,
+            luckyPoints: user.luckyPoints,
+            roundsPlayed: user.roundsPlayed,
+            prizeAmount: prizeAmount,
+            prizeType: prizeType // للاستخدام المستقبلي إذا لزم الأمر
         });
 
     } catch (err) {
-        console.error(`POST /api/user/action: خطأ في الخادم أثناء ${action}:`, err.message);
-        res.status(500).json({ message: `Server error during ${action}`, error: err.message });
+        console.error(`Error in ${actionType}:`, err.message);
+        res.status(500).json({ message: `Server error during ${actionType}`, error: err.message });
     }
-});
+}
 
-// مسار لإعادة تعيين اللعبة (محمي)
+// مسارات إجراءات اللعبة (محمية)
+router.post('/auto-play', authMiddleware, (req, res) => handleGameAction(req, res, 'auto-play'));
+router.post('/triple-strike', authMiddleware, (req, res) => handleGameAction(req, res, 'triple-strike'));
+router.post('/hammer-strike', authMiddleware, (req, res) => handleGameAction(req, res, 'hammer-strike'));
+
+// مسار لإعادة تعيين بيانات المستخدم الفردية (محمي)
+// ملاحظة: هذا يختلف عن إعادة تعيين جميع المستخدمين في لوحة المدير
 router.post('/reset', authMiddleware, async (req, res) => {
-    console.log('POST /api/user/reset: طلب إعادة تعيين اللعبة بدأ.');
+    console.log('POST /api/user/reset: طلب إعادة تعيين اللعبة الفردي بدأ.');
     try {
         const user = await User.findById(req.user.id);
         if (!user) {
@@ -139,30 +146,33 @@ router.post('/reset', authMiddleware, async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        const settings = await Setting.findOne();
-        if (!settings) {
+        const settingsDoc = await Setting.findOne({ name: 'gameConfig' });
+        if (!settingsDoc || !settingsDoc.value) {
             console.error('POST /api/user/reset: إعدادات اللعبة غير موجودة في قاعدة البيانات!');
             return res.status(500).json({ message: 'Game settings not found' });
         }
+        const settings = settingsDoc.value;
 
-        user.score = 0;
-        user.level = 1;
-        user.attempts = settings.initialAttempts; // إعادة تعيين المحاولات إلى القيمة الأولية من الإعدادات
+        // إعادة تعيين الخصائص إلى قيمها الأولية من الإعدادات
+        user.playerCoins = settings.initialCoins || 500; // استخدام قيمة افتراضية إذا لم تكن في الإعدادات
+        user.luckyPoints = 0;
+        user.roundsPlayed = 0;
+        user.personalScores = []; // مسح السجل
 
         await user.save();
-        console.log('POST /api/user/reset: تم إعادة تعيين بيانات المستخدم بنجاح.');
+        console.log('POST /api/user/reset: تم إعادة تعيين بيانات المستخدم الفردي بنجاح.');
 
         res.json({
             message: 'تم إعادة تعيين اللعبة بنجاح!',
-            score: user.score,
-            level: user.level,
-            attempts: user.attempts,
+            playerCoins: user.playerCoins,
+            luckyPoints: user.luckyPoints,
+            roundsPlayed: user.roundsPlayed,
             isAdmin: user.isAdmin
         });
 
     } catch (err) {
-        console.error('POST /api/user/reset: خطأ في الخادم أثناء إعادة تعيين اللعبة:', err.message);
-        res.status(500).json({ message: 'Server error during game reset', error: err.message });
+        console.error(err.message);
+        res.status(500).json({ message: 'Server error during user reset', error: err.message });
     }
 });
 
