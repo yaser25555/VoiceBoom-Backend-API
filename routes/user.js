@@ -42,7 +42,6 @@ router.get('/data', authMiddleware, async (req, res) => {
 // دالة مساعدة لمعالجة إجراءات اللعبة (مثل الضربات)
 async function handleGameAction(req, res, actionType) {
     console.log(`Incoming Request: POST /api/user/${actionType}`); // سجل لكل نوع طلب
-    const token = req.header('Authorization').replace('Bearer ', '');
     // تم حذف التحقق من التوكن هنا لأنه سيتم القيام به بواسطة authMiddleware
 
     try {
