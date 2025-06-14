@@ -1,4 +1,9 @@
 // backend/routes/user.js
+// Temporary comment to force a new commit - please remove later
+const express = require('express');
+// ... بقية الكود ...
+
+// backend/routes/user.js
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User'); // استيراد نموذج المستخدم
@@ -363,4 +368,3 @@ router.post('/triple-strike', authMiddleware, (req, res) => handleGameAction(req
 router.post('/hammer-strike', authMiddleware, (req, res) => handleGameAction(req, res, 'hammer-strike'));
 
 module.exports = router;
-
